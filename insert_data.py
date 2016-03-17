@@ -6,8 +6,6 @@ import Queue
 WORKERS = 2
 cluster = Cluster()
 session = cluster.connect()
-q = Queue.Queue()
-
 
 class SensorData:
     def __init__(self, variable, year, timestamp, value):
@@ -42,6 +40,13 @@ class VariableYear:
         self.year = year
 
 
+def insert_data_batch(data, prepared, get_params):
+    batch = BatchStatement()
+    for d in data:
+        batch.add(prepared, get_params(d))
+    session.execute(batch)
+
+
 # prepared query to insert sensor_data and avoid sql injection
 def insert_sensor_data_query():
     query = "insert into historic_data.sensor_data(variable, year, id, timestamp, value, created_at) " \
@@ -52,15 +57,13 @@ def insert_sensor_data_query():
 # data is a list of objects of type SensorData
 # all elements in data are inserted in batch to cassandra database
 def insert_sensor_data_batch(data):
-    batch = BatchStatement()
-    for d in data:
-        batch.add(insert_sensor_data_query(), (d.variable, d.year, d.timestamp, d.value))
-    session.execute(batch)
+    insert_data_batch(data, insert_sensor_data_query(), lambda d: (d.variable, d.year, d.timestamp, d.value))
 
 
 # data is an object of type SensorData
 def insert_sensor_data(data):
     session.execute(insert_sensor_data_query(), (data.variable, data.year, data.timestamp, data.value))
+
 
 
 #  prepared query to insert context_data
@@ -73,11 +76,7 @@ def insert_context_data_query():
 # data is a list of objects of type ContextData
 # all elements in data are inserted in batch to cassandra database
 def insert_context_data_batch(data):
-    batch = BatchStatement()
-    for d in data:
-        batch.add(insert_context_data_query(),
-                  (d.variable, d.key, d.property_value, d.year, d.timestamp, d.value))
-    session.execute(batch)
+    insert_data_batch(data, insert_context_data_query(), lambda d: (d.variable, d.key, d.property_value, d.year, d.timestamp, d.value))
 
 
 # data is an object of type ContextData
@@ -93,10 +92,7 @@ def insert_tag_data_query():
 
 
 def insert_tag_data_batch(data):
-    batch = BatchStatement()
-    for d in data:
-        batch.add(insert_tag_data_query(), (d.variable, d.tag, d.year, d.timestamp, d.value))
-    session.execute(batch)
+    insert_data_batch(data, insert_tag_data_query(), lambda d: (d.variable, d.tag, d.year, d.timestamp, d.value))
 
 
 # data is a dictionary that contains the keys variable, tag, year, timestamp and value,
@@ -112,10 +108,7 @@ def insert_data_date_query():
 
 
 def insert_data_date_batch(data):
-    batch = BatchStatement()
-    for d in data:
-        batch.add(insert_data_date_query(), (d.variable, d.year))
-    session.execute(batch)
+    insert_data_batch(data, insert_data_date_query(), lambda d: (d.variable, d.year))
 
 
 # data is a dictionary that contains the keys
@@ -129,10 +122,7 @@ def insert_tag_variable_query():
 
 
 def insert_tag_variable_batch(data):
-    batch = BatchStatement()
-    for d in data:
-        batch.add(insert_tag_variable_query(), (d.tag, d.variable))
-    session.execute(batch)
+    insert_data_batch(data, insert_tag_variable_query(), lambda d: (d.tag, d.variable))
 
 
 def insert_tag_variable(data):
@@ -145,10 +135,7 @@ def insert_variable_tag_query():
 
 
 def insert_variable_tag_batch(data):
-    batch = BatchStatement()
-    for d in data:
-        batch.add(insert_variable_tag_query(), (d.tag, d.variable))
-    session.execute(batch)
+    insert_data_batch(data, insert_variable_tag_query(), lambda d: (d.tag, d.variable))
 
 
 def insert_variable_tag(data):
@@ -157,31 +144,105 @@ def insert_variable_tag(data):
 
 # This is the default worker to insert data
 # consume is a function that inserts data to the database
-def worker_insert_batch(consume):
+# and q is a queue that servers the elements to be inserted
+def worker_insert_batch(consume, q):
     while True:
         batch = q.get()
         consume(batch)
         q.task_done()
 
 
-# start WORKERS workers as daemons to perform a task
-# target is the worker function, is the function that will be
-# executed as a thread
-def start_workers_abstract(consume, target):
+# start WORKERS workers as daemons to perform a task.
+# target is the worker function that will be
+# executed as a thread and consume is the function used to insert data
+# to a database
+def start_workers_abstract(consume, target, q):
     for i in range(WORKERS):
-        t = Thread(target=target, args=(consume,))
+        t = Thread(target=target, args=(consume, q, ))
         t.daemon = True
         t.start()
 
 
-def start_workers_insert_sensor_data_batch():
-    start_workers_abstract(insert_sensor_data_batch, worker_insert_batch)
+# starts WORKERS Threads as daemons used
+# to insert data to the sensor_data table
+def start_workers_insert_sensor_data_batch(q):
+    start_workers_abstract(insert_sensor_data_batch, worker_insert_batch, q)
 
 
-def perform_insertion(batches):
+# starts WORKERS Threads as daemons used
+# to insert data to the context_data table
+def start_workers_insert_context_data_batch(q):
+    start_workers_abstract(insert_context_data_batch, worker_insert_batch, q)
+
+
+# starts WORKERS Threads as daemons used
+# to insert data to the tag_data table
+def start_workers_insert_tag_data_batch(q):
+    start_workers_abstract(insert_tag_data_batch, worker_insert_batch, q)
+
+
+def start_workers_insert_data_date_batch(q):
+    start_workers_abstract(insert_data_date_batch, worker_insert_batch, q)
+
+
+def start_workers_insert_tag_variable_batch(q):
+    start_workers_abstract(insert_tag_variable_batch, worker_insert_batch, q)
+
+
+def start_workers_insert_variable_tag_batch(q):
+    start_workers_abstract(insert_tag_variable_batch, worker_insert_batch, q)
+
+
+# fills the queue to serve data to the workers
+def perform_insertion(batches, q):
     for batch in batches:
         q.put(batch)
     q.join()
+
+
+# Performs insertion of data to the sensor_data
+# table using Threads
+def perform_insertion_sensor_data(batches):
+    q = Queue.Queue()
+    start_workers_insert_sensor_data_batch(q)
+    perform_insertion(batches, q)
+
+
+# Performs insertion of data to the context_data
+# table using Threads
+def perform_insertion_context_data(batches):
+    q = Queue.Queue()
+    start_workers_insert_context_data_batch(q)
+    perform_insertion(batches, q)
+
+
+# Performs insertion of data to the sensor_data
+# table using Threads
+def perform_insertion_tag_data(batches):
+    q = Queue.Queue()
+    start_workers_insert_tag_data_batch(q)
+    perform_insertion(batches, q)
+
+
+
+def perform_insertion_data_date(batches):
+    q = Queue.Queue()
+    start_workers_insert_data_date_batch(q)
+    perform_insertion(batches, q)
+
+
+def perform_insertion_tag_variable(batches):
+    q = Queue.Queue()
+    start_workers_insert_tag_variable_batch(q)
+    perform_insertion(batches, q)
+
+
+def perform_insertion_variable_tag(batches):
+    q = Queue.Queue()
+    start_workers_insert_variable_tag_batch(q)
+    perform_insertion(batches, q)
+
+
 
 
 
