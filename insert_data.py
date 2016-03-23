@@ -2,29 +2,51 @@ from cassandra.cluster import Cluster
 from cassandra.query import BatchStatement
 from threading import Thread
 import Queue
+from datetime import datetime
+from cassandra.auth import PlainTextAuthProvider
+import uuid
 
-WORKERS = 2
+# in case authentication is required for the cluster
+auth_provider = PlainTextAuthProvider(username='cassandra', password='cassandra')
+# Number of threads
+WORKERS = 50
+# Modify this to access a different cassandra cluster
 cluster = Cluster()
 session = cluster.connect()
 
+
 class SensorData:
-    def __init__(self, variable, year, timestamp, value):
+    def __init__(self, variable, year, timestamp_data, value,
+                 id_data=None, created_at=None, uuid1_data=None):
         self.variable = variable
         self.year = year
-        self.timestamp = timestamp
+        self.timestamp_data = timestamp_data
         self.value = value
+        if id_data is None:
+            self.id_data = uuid.uuid4()
+        else:
+            self.id_data = id_data
+        if uuid1_data is None:
+            self.uuid1_data = uuid.uuid1()
+        else:
+            self.uuid1_data = uuid1_data
+        if created_at is None:
+            self.created_at = datetime.now()
+        else:
+            self.created_at = created_at
 
 
 class ContextData(SensorData):
-    def __init__(self, variable, year, timestamp, value, key, property_value):
-        SensorData.__init__(self, variable, year, timestamp, value)
+    def __init__(self, variable, year, timestamp_data, value, key, property_value, id_data=None,
+                 created_at=None):
+        SensorData.__init__(self, variable, year, timestamp_data, value, id_data, created_at)
         self.key = key
         self.property_value = property_value
 
 
 class TagData(SensorData):
-    def __init__(self, variable, year, timestamp, value, tag):
-        SensorData.__init__(self, variable, year, timestamp, value)
+    def __init__(self, variable, year, timestamp_data, value, tag, id_data=None, created_at=None):
+        SensorData.__init__(self, variable, year, timestamp_data, value, id_data, created_at)
         self.tag = tag
 
 
@@ -34,10 +56,31 @@ class TagVariable:
         self.variable = variable
 
 
+class ContextVariable:
+    def __init__(self, variable, key):
+        self.key = key
+        self.variable = variable
+
+
 class VariableYear:
     def __init__(self, variable, year):
         self.variable = variable
         self.year = year
+
+
+def get_all_sensor_data():
+    r = session.execute("select * from historic_data.sensor_data")
+    result = []
+    for x in r:
+        result.append(SensorData(x.variable, x.year, x.timestamp_data, x.value, x.id_data, x.created_at))
+    return result
+
+
+def get_sensor_data_by_id(id_data, timestamp_data, year, variable):
+    query = "select * from historic_data.sensor_data where id_data = ? and timestamp_data = ? and" \
+            " year = ? and variable = ?"
+    prepared = session.prepare(query)
+    return session.execute(prepared, (id_data, timestamp_data, year, variable))
 
 
 def insert_data_batch(data, prepared, get_params):
@@ -49,57 +92,81 @@ def insert_data_batch(data, prepared, get_params):
 
 # prepared query to insert sensor_data and avoid sql injection
 def insert_sensor_data_query():
-    query = "insert into historic_data.sensor_data(variable, year, id, timestamp, value, created_at) " \
-            "values(?,?,uuid(), ?, ?, dateof(now()));"
+    query = "insert into historic_data.sensor_data(variable, year, id_data, timestamp_data, value," \
+            " created_at, uuid1_data) " \
+            "values(?,?,?,?,?,?,?);"
     return session.prepare(query)
 
 
 # data is a list of objects of type SensorData
 # all elements in data are inserted in batch to cassandra database
 def insert_sensor_data_batch(data):
-    insert_data_batch(data, insert_sensor_data_query(), lambda d: (d.variable, d.year, d.timestamp, d.value))
+    insert_data_batch(data, insert_sensor_data_query(), lambda d: (d.variable, d.year, d.id_data,
+                                                                   d.timestamp_data, d.value, d.created_at, d.uuid1_data))
 
 
 # data is an object of type SensorData
 def insert_sensor_data(data):
-    session.execute(insert_sensor_data_query(), (data.variable, data.year, data.timestamp, data.value))
+    session.execute(insert_sensor_data_query(), (data.variable, data.year, data.id_data,
+                                                 data.timestamp_data, data.value, data.created_at, data.uuid1_data))
 
+
+def get_context_data_by_id(id_data, timestamp_data, year, variable, key, property_value):
+    query = "select * from historic_data.context_data where id_data = ? and timestamp_data = ? and" \
+            " year = ? and variable = ? and key = ? and property_value = ?"
+    prepared = session.prepare(query)
+    return session.execute(prepared, (id_data, timestamp_data, year, variable, key, property_value))
 
 
 #  prepared query to insert context_data
 def insert_context_data_query():
-    query = "insert into historic_data.context_data(variable, key,property_value, year, id, timestamp,value,created_at)"
-    query += " values(?,?,?,?, uuid(), ?,?, dateof(now()));"
+    query = "insert into historic_data.context_data(variable, key,property_value, year, id_data, " \
+            "timestamp_data,value,created_at, uuid1_data)"
+    query += " values(?,?,?,?,?,?,?,?,?);"
     return session.prepare(query)
 
 
 # data is a list of objects of type ContextData
 # all elements in data are inserted in batch to cassandra database
 def insert_context_data_batch(data):
-    insert_data_batch(data, insert_context_data_query(), lambda d: (d.variable, d.key, d.property_value, d.year, d.timestamp, d.value))
+    insert_data_batch(data, insert_context_data_query(),
+                      lambda d: (d.variable, d.key, d.property_value, d.year, d.id_data,
+                                 d.timestamp_data, d.value, d.created_at, d.uuid1_data))
 
 
 # data is an object of type ContextData
 def insert_context_data(data):
     session.execute(insert_context_data_query(), (
-        data.variable, data.key, data.property_value, data.year, data.timestamp, data.value))
+        data.variable, data.key, data.property_value, data.year, data.id_data,
+        data.timestamp_data, data.value, data.created_at, data.uuid1_data))
+
+
+def get_tag_data_by_id(id_data, timestamp_data, year, variable, tag):
+    query = "select * from historic_data.tag_data where id_data = ? and timestamp_data = ? and" \
+            " year = ? and variable = ? and tag = ?"
+    prepared = session.prepare(query)
+    return session.execute(prepared, (id_data, timestamp_data, year, variable, tag))
 
 
 def insert_tag_data_query():
-    query = "insert into historic_data.tag_data(variable, tag, year, id, timestamp, value, created_at) "
-    query += "values(?,?,?,uuid(),?,?,dateof(now()));"
+    query = "insert into historic_data.tag_data(variable, tag, year, id_data, timestamp_data, value, " \
+            "created_at, uuid1_data) "
+    query += "values(?,?,?,?,?,?,?,?);"
     return session.prepare(query)
 
 
 def insert_tag_data_batch(data):
-    insert_data_batch(data, insert_tag_data_query(), lambda d: (d.variable, d.tag, d.year, d.timestamp, d.value))
+    insert_data_batch(data, insert_tag_data_query(), lambda d: (d.variable, d.tag, d.year, d.id_data,
+                                                                d.timestamp_data, d.value, d.created_at, d.uuid1_data))
 
 
 # data is a dictionary that contains the keys variable, tag, year, timestamp and value,
 # the id and created_at fields are automatically generated by cassandra
 def insert_tag_data(data):
     session.execute(insert_tag_data_query(),
-                    (data.variable, data.tag, data.year, data.timestamp, data.value))
+                    (
+                    data.variable, data.tag, data.year, data.id_data, data.timestamp_data, data.value, data.created_at,
+                    data.uuid1_data))
 
 
 def insert_data_date_query():
@@ -114,6 +181,15 @@ def insert_data_date_batch(data):
 # data is a dictionary that contains the keys
 def insert_data_date(data):
     session.execute(insert_data_date_query(), (data.variable, data.year))
+
+
+def insert_context_variable_query():
+    query = "insert into historic_data.context_variable(key, variable) values(?, ?);"
+    return session.prepare(query)
+
+
+def insert_context_variable(data):
+    session.execute(insert_context_variable_query(), (data.key, data.variable))
 
 
 def insert_tag_variable_query():
@@ -158,7 +234,7 @@ def worker_insert_batch(consume, q):
 # to a database
 def start_workers_abstract(consume, target, q):
     for i in range(WORKERS):
-        t = Thread(target=target, args=(consume, q, ))
+        t = Thread(target=target, args=(consume, q,))
         t.daemon = True
         t.start()
 
@@ -224,7 +300,6 @@ def perform_insertion_tag_data(batches):
     perform_insertion(batches, q)
 
 
-
 def perform_insertion_data_date(batches):
     q = Queue.Queue()
     start_workers_insert_data_date_batch(q)
@@ -241,10 +316,3 @@ def perform_insertion_variable_tag(batches):
     q = Queue.Queue()
     start_workers_insert_variable_tag_batch(q)
     perform_insertion(batches, q)
-
-
-
-
-
-# c = ContextData('va1xy', 2016, 1999199, 100.0, 'key', 'pv')
-# insert_context_data(c)

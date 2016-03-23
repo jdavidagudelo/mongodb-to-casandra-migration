@@ -1,67 +1,63 @@
-//Get historic data by variable, or timestamp
-//date field used to avoid partitions to overflow the maximum 
-//number of columns allowed by cassandra
+CREATE KEYSPACE historic_data WITH replication =
+{'class': 'NetworkTopologyStrategy', 'dc1': 3}  AND
+durable_writes = true;
 CREATE TABLE historic_data.sensor_data (
     variable text,
-	id uuid,
-	year int,
-    timestamp timestamp,
-    value float,
-	created_at timestamp,
-    PRIMARY KEY ((variable, year), timestamp, id)
-);
-
-//table used to get existing dates with records of a variable
-CREATE TABLE historic_data.data_date(
-	year int,
-	variable text,
-	primary key(variable, year)
-);
-
-//Get historic data by context info
-CREATE TABLE historic_data.context_data (
-    key text,
     year int,
-	id uuid,
+    timestamp_data varint,
+    id_data uuid,
+    uuid1_data uuid,
+    created_at timestamp,
+    value double,
+    PRIMARY KEY ((variable, year), timestamp_data, id_data, uuid1_data)
+);
+
+CREATE TABLE historic_data.tag_data (
+    tag text,
     variable text,
-    timestamp timestamp,
+    year int,
+    timestamp_data varint,
+    id_data uuid,
+    uuid1_data uuid,
+    created_at timestamp,
+    value double,
+    PRIMARY KEY ((tag, variable, year), timestamp_data, id_data, uuid1_data)
+);
+
+
+CREATE TABLE historic_data.context_data (
+    variable text,
+    key text,
     property_value text,
-	value float,
-	created_at timestamp,
-    PRIMARY KEY ((variable, key, property_value, year), timestamp, id)
+    year int,
+    timestamp_data varint,
+    id_data uuid,
+    uuid1_data uuid,
+    created_at timestamp,
+    value double,
+    PRIMARY KEY ((variable, key, year), timestamp_data, property_value, id_data, uuid1_data)
 );
 
-//get historic data by tag
-CREATE TABLE historic_data.tag_data(
-	tag text, 
-	year int,
-	id uuid, 
-	variable text, 
-	timestamp timestamp,
-	value float, 
-	created_at timestamp, 
-	PRIMARY KEY ((tag, variable, year), timestamp, id)
+CREATE TABLE historic_data.tag_variable (
+    tag text PRIMARY KEY,
+    variable text,
+    PRIMARY KEY(tag, variable)
 );
 
-//get variables by tag
-CREATE TABLE historic_data.tag_variable(
-	tag text, 
-	variable text, 
-	PRIMARY KEY (tag)
+CREATE TABLE historic_data.variable_tag (
+    variable text,
+    tag text,
+    PRIMARY KEY(variable, tag)
 );
 
-CREATE TABLE historic_data.variable_tag(
-	tag text, 
-	variable text, 
-	PRIMARY KEY (variable)
+CREATE TABLE historic_data.context_variable(
+    variable text,
+    key text,
+    PRIMARY KEY (variable, key)
 );
 
-//variable basic info
-CREATE TABLE historic_data.variable(
-	id text,
-	name text,
-	unit text,
-	description text,
-	created_at timestamp,
-	PRIMARY KEY (id)
+CREATE TABLE historic_data.data_date (
+    variable text,
+    year int,
+    PRIMARY KEY (variable, year)
 );

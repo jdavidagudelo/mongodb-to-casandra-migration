@@ -1,0 +1,2 @@
+import python_creation
+python_creation.create_structure()
