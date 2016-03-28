@@ -1,6 +1,5 @@
 from threading import Thread
 from datetime import datetime
-import pymongo
 from pymongo import mongo_client
 from insert_data import SensorData
 from insert_data import VariableYear
@@ -8,8 +7,12 @@ from insert_data import ContextData
 from insert_data import ContextVariable
 from insert_data import TagVariable
 from insert_data import TagData
-from bson.objectid import ObjectId
-import insert_data
+from insert_data import SensorDataDao
+from insert_data import ContextDataDao
+from insert_data import ContextVariableDao
+from insert_data import TagVariableDao
+from insert_data import TagDataDao
+from insert_data import VariableYearDao
 import Queue
 
 
@@ -21,8 +24,15 @@ database_name = "ubidots-draft-nonrel"  # database name
 collection_name = "value"  # collection name
 db = client.get_database(database_name)
 collection = db.get_collection(collection_name)
+variables = db.get_collection("variable")
 # Number of element per cursor in mongo
 batch_size = 1000
+sensor_data_dao = SensorDataDao()
+context_data_dao = ContextDataDao()
+context_variable_dao = ContextVariableDao()
+tag_variable_dao = TagVariableDao()
+tag_data_dao = TagDataDao()
+variable_year_dao = VariableYearDao()
 
 
 # Method run inside all created threads. consume corresponds to
@@ -134,7 +144,6 @@ def get_tag_variable_from_record(record):
     timestamp = t * 1000  # timestamp comes in millis should be stored in micros
     date = datetime.fromtimestamp(float(t) / 1000.0)
     year = date.year
-    variables = db.get_collection("variable")
     v = variables.find({'_id': record['variable'].id}).next()
     result = []
     result_tags = []
@@ -149,18 +158,18 @@ def get_tag_variable_from_record(record):
 # uses it to migrate the information to a Cluster with Cassandra.
 def process_batch_data(batch):
     for value in batch:
-        insert_data.insert_sensor_data(get_sensor_data_from_record(value))
-        insert_data.insert_data_date(get_data_date_from_record(value))
+        sensor_data_dao.insert_sensor_data(get_sensor_data_from_record(value))
+        variable_year_dao.insert_data_date(get_data_date_from_record(value))
         for context in get_context_data_from_record(value):
-            insert_data.insert_context_data(context)
+            context_data_dao.insert_context_data(context)
         for context_variable in get_context_variable_from_record(value):
-            insert_data.insert_context_variable(context_variable)
+            context_variable_dao.insert_context_variable(context_variable)
         (tag_variable, tag_data) = get_tag_variable_from_record(value)
         for t in tag_variable:
-            insert_data.insert_variable_tag(t)
-            insert_data.insert_tag_variable(t)
+            tag_variable_dao.insert_variable_tag(t)
+            tag_variable_dao.insert_tag_variable(t)
         for t in tag_data:
-            insert_data.insert_tag_data(t)
+            tag_data_dao.insert_tag_data(t)
 
 
 # Returns a Mongo DB cursor that performs the query specified as parameter on the collection c and
@@ -169,4 +178,11 @@ def get_batch(skip, limit, c, query):
     return c.find(query).skip(skip).limit(limit)
 
 
+def read_test():
+    ids = variable_year_dao.get_all_variable_year()
+    count = 0
+    for id in ids:
+        l = sensor_data_dao.get_sensor_data_by_id(id.year, id.variable)
+        count += len(l)
+    return count
 

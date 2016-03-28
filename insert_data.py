@@ -38,15 +38,16 @@ class SensorData:
 
 class ContextData(SensorData):
     def __init__(self, variable, year, timestamp_data, value, key, property_value, id_data=None,
-                 created_at=None):
-        SensorData.__init__(self, variable, year, timestamp_data, value, id_data, created_at)
+                 created_at=None, uuid1_data=None):
+        SensorData.__init__(self, variable, year, timestamp_data, value, id_data, created_at, uuid1_data
+                            )
         self.key = key
         self.property_value = property_value
 
 
 class TagData(SensorData):
-    def __init__(self, variable, year, timestamp_data, value, tag, id_data=None, created_at=None):
-        SensorData.__init__(self, variable, year, timestamp_data, value, id_data, created_at)
+    def __init__(self, variable, year, timestamp_data, value, tag, id_data=None, created_at=None, uuid1_data=None):
+        SensorData.__init__(self, variable, year, timestamp_data, value, id_data, created_at, uuid1_data)
         self.tag = tag
 
 
@@ -66,6 +67,90 @@ class VariableYear:
     def __init__(self, variable, year):
         self.variable = variable
         self.year = year
+
+
+class SensorDataDao:
+    def __init__(self):
+        self.session = session
+        self.insert_sensor_data_query = insert_sensor_data_query()
+
+    def insert_sensor_data(self, data):
+        self.session.execute(self.insert_sensor_data_query, (data.variable, data.year, data.id_data,
+                                                             data.timestamp_data, data.value, data.created_at,
+                                                             data.uuid1_data))
+
+    def get_sensor_data_by_id(self, year, variable):
+        query = "select * from historic_data.sensor_data where" \
+            " year = ? and variable = ?;"
+        prepared = self.session.prepare(query)
+        r = session.execute(prepared, (year, variable))
+        result = []
+        for x in r:
+            result.append(SensorData(x.variable, x.year, x.timestamp_data, x.value,
+                                     x.id_data, x.created_at, x.uuid1_data))
+        return result
+
+
+class ContextDataDao:
+    def __init__(self):
+        self.session = session
+        self.insert_context_data_query = insert_context_data_query()
+
+    def insert_context_data(self, data):
+        self.session.execute(self.insert_context_data_query, (
+            data.variable, data.key, data.property_value, data.year, data.id_data,
+            data.timestamp_data, data.value, data.created_at, data.uuid1_data))
+
+
+class TagDataDao:
+    def __init__(self):
+        self.session = session
+        self.insert_tag_data_query = insert_tag_data_query()
+
+    def insert_tag_data(self, data):
+        self.session.execute(self.insert_tag_data_query,
+                             (
+                                 data.variable, data.tag, data.year, data.id_data, data.timestamp_data, data.value,
+                                 data.created_at,
+                                 data.uuid1_data))
+
+
+class VariableYearDao:
+    def __init__(self):
+        self.session = session
+        self.insert_data_date_query = insert_data_date_query()
+
+    def insert_data_date(self, data):
+        self.session.execute(self.insert_data_date_query, (data.variable, data.year))
+
+    def get_all_variable_year(self):
+        r = self.session.execute("select * from historic_data.data_date;")
+        result = []
+        for x in r:
+            result.append(VariableYear(x.variable, x.year))
+        return result
+
+
+class ContextVariableDao:
+    def __init__(self):
+        self.session = session
+        self.insert_context_variable_query = insert_context_variable_query()
+
+    def insert_context_variable(self, data):
+        self.session.execute(self.insert_context_variable_query, (data.key, data.variable))
+
+
+class TagVariableDao:
+    def __init__(self):
+        self.session = session
+        self.insert_tag_variable_query = insert_tag_variable_query()
+        self.insert_variable_tag_query = insert_variable_tag_query()
+
+    def insert_tag_variable(self, data):
+        self.session.execute(self.insert_tag_variable_query, (data.tag, data.variable))
+
+    def insert_variable_tag(self, data):
+        self.session.execute(self.insert_variable_tag_query, (data.tag, data.variable))
 
 
 def get_all_sensor_data():
@@ -102,7 +187,8 @@ def insert_sensor_data_query():
 # all elements in data are inserted in batch to cassandra database
 def insert_sensor_data_batch(data):
     insert_data_batch(data, insert_sensor_data_query(), lambda d: (d.variable, d.year, d.id_data,
-                                                                   d.timestamp_data, d.value, d.created_at, d.uuid1_data))
+                                                                   d.timestamp_data, d.value, d.created_at,
+                                                                   d.uuid1_data))
 
 
 # data is an object of type SensorData
@@ -165,8 +251,9 @@ def insert_tag_data_batch(data):
 def insert_tag_data(data):
     session.execute(insert_tag_data_query(),
                     (
-                    data.variable, data.tag, data.year, data.id_data, data.timestamp_data, data.value, data.created_at,
-                    data.uuid1_data))
+                        data.variable, data.tag, data.year, data.id_data, data.timestamp_data, data.value,
+                        data.created_at,
+                        data.uuid1_data))
 
 
 def insert_data_date_query():

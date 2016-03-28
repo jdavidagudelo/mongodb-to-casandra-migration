@@ -1,5 +1,5 @@
 import netifaces as nif
-import uuid
+
 
 def get_posixtime(uuid1):
     """Convert the uuid1 timestamp to a standard posix timestamp
